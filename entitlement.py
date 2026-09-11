@@ -47,6 +47,7 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from exporters import FIELD_GROUPS
 from risk_rules import risk_summary
+from comparison import build_comparison, comparison_headline
 from schema import CLAUSE_TYPES
 
 INK = "1C2B33"
@@ -411,7 +412,65 @@ def _clauses_sheet(wb: Workbook, batch) -> Worksheet:
 
 
 # ---------------------------------------------------------------------------
-# Sheet 5: Issues (only when something failed)
+# Sheet: Comparison (side-by-side across contracts)
+# ---------------------------------------------------------------------------
+
+def _comparison_sheet(wb: Workbook, batch) -> Worksheet | None:
+    """
+    One row per term, one column per contract.
+
+    Only produced for two or more contracts -- a side-by-side of a single
+    contract is just its terms again, which the per-contract sheet already
+    has. The least favourable value in each row is highlighted, using the
+    same reasoning as the app: absence outranks any number where absence is
+    itself the risk (no price cap means unlimited increases).
+    """
+    results = batch.successful
+    if len(results) < 2:
+        return None
+
+    rows = build_comparison(results)
+    if not rows:
+        return None
+
+    ws = wb.create_sheet("Comparison")
+    _title_block(
+        ws, "Side-by-side Comparison",
+        "One row per term, one column per contract. Red marks the least "
+        "favourable value; italics mark a term whose ABSENCE is the risk. "
+        "A term is only ranked where two or more contracts have a comparable value.",
+    )
+
+    headers = ["Term"] + [r.vendor for r in results] + ["What stands out"]
+    _header_row(ws, headers, row=4)
+    _widths(ws, [26] + [22] * len(results) + [60])
+
+    for index, spec in enumerate(rows):
+        row_number = 5 + index
+        worst = spec.worst_index()
+        absent = set(spec.absent_indices())
+
+        _cell(ws, row_number, 1, spec.label, bold=True)
+        for col, cell_value in enumerate(spec.cells):
+            styled_col = col + 2
+            if col == worst:
+                _cell(ws, row_number, styled_col, cell_value.display,
+                      bold=True, color="B23A32", fill=SEVERITY_FILL["high"])
+            elif col in absent:
+                _cell(ws, row_number, styled_col, cell_value.display,
+                      italic=True, color="B23A32")
+            else:
+                _cell(ws, row_number, styled_col, cell_value.display)
+
+        headline = comparison_headline(spec, results) or ""
+        _cell(ws, row_number, len(results) + 2, headline, italic=True, color=MUTED)
+
+    ws.auto_filter.ref = f"A4:{get_column_letter(len(headers))}{4 + len(rows)}"
+    return ws
+
+
+# ---------------------------------------------------------------------------
+# Sheet: Issues (only when something failed)
 # ---------------------------------------------------------------------------
 
 def _issues_sheet(wb: Workbook, batch) -> Worksheet | None:
@@ -573,12 +632,13 @@ def generate_batch_workbook(batch) -> bytes:
     # loses its sheet reference and openpyxl quietly renames the duplicate
     # tab behind your back.
     taken: set[str] = {
-        "Entitlement Summary", "Contracts Overview", "Key Clauses",
-        "Risk Register", "Issues",
+        "Entitlement Summary", "Contracts Overview", "Comparison",
+        "Key Clauses", "Risk Register", "Issues",
     }
     sheet_names = [safe_sheet_name(r.filename, taken) for r in batch.successful]
 
     _overview_sheet(wb, batch, sheet_names)
+    _comparison_sheet(wb, batch)
     _clauses_sheet(wb, batch)
     _risk_register_sheet(wb, batch)
     _issues_sheet(wb, batch)

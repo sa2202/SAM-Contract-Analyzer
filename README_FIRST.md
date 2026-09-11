@@ -1,57 +1,49 @@
-# Automatic model rotation — no more editing settings
+# Multi-contract comparison
 
-Replace `app.py`, `extract.py`, `batch.py`.
+New file `comparison.py`, plus updated `app.py` and `entitlement.py`.
+Copy all three in. No new dependencies.
 
-## The problem
+## What it adds
 
-Free-tier daily quota is counted **per model**. When one runs out, the app
-stopped and someone had to edit `GEMINI_MODEL` in Streamlit secrets — for
-everyone, potentially daily. That puts one administrator in the loop for
-every other person's failure, at exactly the moment they're mid-task.
+A **Compare** tab (appears with 2+ contracts) and a **Comparison** sheet in
+the workbook. Two modes:
 
-## What it does now
+- **Key terms** — one row per term, one column per contract. Audit notice
+  across five agreements reads as 10 / 45 / 30 / 30 / 7 in a single glance
+  instead of five paragraphs of stacked prose.
+- **Clause text** — the actual language side by side in columns, so wording
+  differences are visible without scrolling between them.
 
-The app keeps an ordered list of models and moves to the next one by itself
-when a daily quota is exhausted. Nobody edits anything.
+The least favourable value in each row is marked red, with a plain sentence
+underneath: "Ranges from 7 days (Initrode) to 45 days (Initech)."
 
-- Default order: `gemini-3.6-flash` → `gemini-3.7-flash` →
-  `gemini-flash-lite-latest`
-- Override with a `GEMINI_MODELS` secret (comma-separated). `GEMINI_MODEL`,
-  if set, still leads the list.
-- The switch is announced in the progress log, not silent — a user should
-  know why results came from a different model, and it's the signal that the
-  day's quota on the first one is gone.
+## One thing worth knowing
 
-Three deliberate limits on the behaviour:
+**Absence can outrank any number.** A missing price-escalation cap means
+increases are *unlimited*, which is worse than any stated cap. The first
+version ranked only contracts that HAD a cap — and so flagged a 5% cap as
+the worst while two contracts with uncapped increases sat unmarked. That
+isn't cosmetic; it points the reviewer at the wrong contract. Terms where
+absence is the risk now mark the missing ones instead, and the summary line
+names them before describing the range.
 
-- **Only daily quota errors trigger a switch.** A per-minute limit is handled
-  by waiting; rotating would spend another model's scarce daily allowance to
-  dodge a 60-second pause. Any other error is a real failure and is raised
-  immediately rather than retried across every model, which would turn one
-  bad document into several failures.
-- **Exhausted models are remembered per API key**, so a batch doesn't
-  rediscover the same dead model once per contract. Tracked against a short
-  hash of the key, never the key itself — one person's exhausted quota says
-  nothing about another's.
-- **A fully-exhausted list still attempts every model** rather than failing
-  without a call. Quotas reset at midnight Pacific and that cache has no
-  clock, so a stale entry must never be the only reason a request isn't made.
+## No extra API calls
+
+Every value is already extracted. This only reorganises it, so the page
+numbers and quotes behind each cell still apply and any figure can be checked
+against the source. Nothing is re-read and no quota is spent.
 
 ## Install
 
 ```bash
 cd ~/Downloads/SAM-Contract-Analyzer
 cp /path/to/updated-files/*.py .
-git add app.py extract.py batch.py
-git commit -m "Automatic model fallback on daily quota exhaustion"
+source .venv/bin/activate
+streamlit run app.py        # test locally FIRST
+git add app.py comparison.py entitlement.py
+git commit -m "Add multi-contract comparison"
 git push
 ```
 
-## Honest limits
-
-This multiplies your daily headroom by the number of models available, and
-removes the admin task. It does not make the free tier suitable for sustained
-team use — roughly 20 requests per model per day, and a long contract can
-cost several. Combined with per-person keys in the sidebar it stretches
-considerably further, but billing remains the only thing that actually
-removes the ceiling.
+`comparison.py` is a new file — make sure `git add` picks it up. An untracked
+new file is the most common way a deploy ends up half-applied.
